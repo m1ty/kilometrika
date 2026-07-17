@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Километрика</title>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/vendor/leaflet.min.css">
+<script src="/static/vendor/leaflet.min.js"></script>
+<style>
+  :root {
+    --bg: #101418;
+    --panel: #171d24;
+    --line: #242d37;
+    --text: #d7dee6;
+    --dim: #7d8b99;
+    --hr: #e05c5c;       /* пульс */
+    --speed: #58a6ff;    /* скорость */
+    --elev: #4d5a48;     /* рельеф */
+    --accent: #7ee08a;   /* итоги */
+    --run: #7ee08a;      /* бег */
+    --bike: #58a6ff;     /* велосипед */
+    --other: #c9a15a;    /* прочие виды спорта */
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding: 24px; max-width: 1200px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: .04em; }
+  h1 span { color: var(--accent); }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .mono { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 12px; }
+
+  #drop {
+    border: 1.5px dashed var(--line); border-radius: 8px; padding: 14px;
+    text-align: center; color: var(--dim); cursor: pointer; margin-bottom: 16px;
+    transition: border-color .15s, color .15s;
+  }
+  #drop.hover, #drop:hover { border-color: var(--accent); color: var(--accent); }
+
+  .act {
+    padding: 10px 8px; border-bottom: 1px solid var(--line);
+    cursor: pointer; display: flex; justify-content: space-between; gap: 8px;
+    border-left: 2px solid transparent;
+  }
+  .act:hover { background: rgba(255,255,255,.03); }
+  .act.sel { border-left-color: var(--sport-c, var(--accent)); background: rgba(255,255,255,.05); }
+  .act .sport { color: var(--dim); font-size: 12px; }
+  .act .sport::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 6px; vertical-align: baseline;
+    background: var(--sport-c, var(--other));
+  }
+  .act .dist { color: var(--sport-c, var(--accent)); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 20px; font-weight: 600; }
+  .stat span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  .stat.hr b { color: var(--hr); } .stat.spd b { color: var(--speed); } .stat.dst b { color: var(--accent); }
+
+  canvas { max-height: 320px; }
+  #weeklyChart { max-height: 180px; }
+  .muted { color: var(--dim); }
+  button.del {
+    background: none; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+  }
+  button.del:hover { border-color: var(--hr); color: var(--hr); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: none; border: none; color: var(--dim); padding: 4px 12px;
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: rgba(126,224,138,.12); color: var(--text); }
+  #map {
+    height: 300px; border-radius: 6px; margin-bottom: 16px;
+    border: 1px solid var(--line); background: var(--bg);
+  }
+  .leaflet-container { font: inherit; }
+  .leaflet-control-attribution {
+    background: rgba(16,20,24,.55) !important;
+    color: #5a6672 !important;
+    font-size: 9px !important;
+    padding: 1px 5px !important;
+  }
+  .leaflet-control-attribution a { color: #5a6672 !important; }
+  .sect { margin-top: 18px; }
+  .sect h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); margin-bottom: 8px; }
+  #notes {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+    font: inherit; resize: vertical;
+  }
+  #notes:focus { outline: none; border-color: var(--accent); }
+  .notesrow { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 6px; }
+  #photoGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .ph { position: relative; }
+  .ph img, .ph video { width: 100%; height: 100px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .ph img { cursor: pointer; }
+  .ph video { background: #000; cursor: pointer; }
+  .ph .play {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #fff; font-size: 26px;
+    text-shadow: 0 0 8px rgba(0,0,0,.8); pointer-events: none;
+  }
+  .ph button {
+    position: absolute; top: 4px; right: 4px; background: rgba(16,20,24,.75);
+    color: var(--hr); border: none; border-radius: 4px; cursor: pointer;
+    font-size: 13px; padding: 2px 7px;
+  }
+  .photoAdd {
+    display: inline-block; border: 1.5px dashed var(--line); border-radius: 6px;
+    padding: 8px 14px; color: var(--dim); cursor: pointer; font-size: 13px;
+  }
+  .photoAdd:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Кило<span>метрика</span></h1>
+  <div class="muted mono" id="counter"></div>
+</header>
+
+<div class="grid">
+  <div>
+    <div id="drop">Перетащи .tcx / .gpx сюда или кликни для выбора
+      <input type="file" id="fileInput" accept=".tcx,.gpx" multiple hidden>
+    </div>
+    <div class="panel">
+      <h2>Тренировки</h2>
+      <div id="list" class="mono" style="font-size:13px"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0" id="aggTitle">Километраж по неделям</h2>
+        <div class="seg">
+          <button data-p="week" class="on">Недели</button><button data-p="month">Месяцы</button><button data-p="year">Годы</button>
+        </div>
+      </div>
+      <canvas id="weeklyChart"></canvas>
+    </div>
+    <div class="panel" id="detail" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 id="detailTitle" style="margin:0"></h2>
+        <button class="del" id="delBtn">удалить</button>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div id="map" hidden></div>
+      <canvas id="actChart"></canvas>
+      <div class="sect">
+        <h2>Впечатления</h2>
+        <textarea id="notes" rows="3" placeholder="Как прошла тренировка?"></textarea>
+        <div class="notesrow"><span id="notesStatus" class="muted"></span>
+          <button class="del" id="notesSave">сохранить</button></div>
+      </div>
+      <div class="sect">
+        <h2>Фото и видео</h2>
+        <div id="photoGrid"></div>
+        <label class="photoAdd">+ добавить фото или видео
+          <input type="file" id="photoInput" accept="image/*,video/*" multiple hidden>
+        </label>
+      </div>
+    </div>
+    <div class="panel muted" id="placeholder">Выбери тренировку слева — покажу пульс, скорость и рельеф.</div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let selectedId = null, weeklyChart = null, actChart = null;
+
+// экранирование для innerHTML: sport приходит из загруженного файла
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// текст ошибки из ответа сервера (может быть и не-JSON, например 500)
+const errText = async r => {
+  try { return (await r.json()).detail; } catch { return `HTTP ${r.status}`; }
+};
+
+const fmtDur = s => {
+  s = s || 0;
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
+  return h ? `${h}ч ${m}м` : `${m}м ${Math.floor(s%60)}с`;
+};
+
+// Категория спорта по названию — Huawei/Garmin пишут кто во что горазд
+// ("Бег на улице", "Running", "Biking", "Езда на велосипеде"...)
+const CAT_COLORS = { run: "#7ee08a", bike: "#58a6ff", other: "#c9a15a" };
+// категорию считает сервер при импорте; эвристика — фолбэк для старых записей
+const sportCat = a => a.category ||
+  (/бег|run|jog/i.test(a.sport||"") ? "run" : /вел|bik|cycl|ride/i.test(a.sport||"") ? "bike" : "other");
+const catColor = a => CAT_COLORS[sportCat(a)] || CAT_COLORS.other;
+const asUTC = iso => /Z$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z";
+const fmtDate = iso => iso ? new Date(asUTC(iso)).toLocaleString("ru-RU",
+  {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"}) : "—";
+const pace = (dur, dist) => {
+  if (!dist) return "—";
+  const spk = dur / (dist/1000), m = Math.floor(spk/60), s = Math.round(spk%60);
+  return `${m}:${String(s).padStart(2,"0")} /км`;
+};
+
+async function loadList() {
+  const acts = await (await fetch("/api/activities")).json();
+  $("#counter").textContent = acts.length + " активностей";
+  $("#list").innerHTML = acts.length ? "" : '<div class="muted">Пока пусто</div>';
+  for (const a of acts) {
+    const el = document.createElement("div");
+    el.className = "act" + (a.id === selectedId ? " sel" : "");
+    el.style.setProperty("--sport-c", catColor(a));
+    el.innerHTML = `<div>${fmtDate(a.start_time)}<div class="sport">${esc(a.sport)}</div></div>
+                    <div class="dist">${((a.distance_m||0)/1000).toFixed(1)} км</div>`;
+    el.onclick = () => showActivity(a.id);
+    $("#list").appendChild(el);
+  }
+}
+
+let aggPeriod = "week";
+const AGG = {
+  week:  { title: "Километраж по неделям", last: 12 },
+  month: { title: "Километраж по месяцам", last: 12 },
+  year:  { title: "Километраж по годам",   last: 10 },
+};
+
+function periodKey(dateStr, period) {
+  const d = new Date(asUTC(dateStr));   // как в fmtDate: naive-строки — это UTC
+  if (period === "year")  return String(d.getFullYear());
+  if (period === "month") return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  // ISO week
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const w = Math.ceil((((t - new Date(Date.UTC(t.getUTCFullYear(),0,1))) / 864e5) + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(w).padStart(2,"0")}`;
+}
+
+async function loadWeekly() {
+  const acts = await (await fetch("/api/activities")).json();
+  const byKey = {};
+  for (const a of acts) {
+    if (!a.start_time) continue;
+    const k = periodKey(a.start_time, aggPeriod);
+    (byKey[k] ??= { run: 0, bike: 0, other: 0 })[sportCat(a)] += (a.distance_m || 0) / 1000;
+  }
+  const keys = Object.keys(byKey).sort().slice(-AGG[aggPeriod].last);
+  $("#aggTitle").textContent = AGG[aggPeriod].title;
+  const ds = (key, label, color) => ({
+    label, data: keys.map(k => +byKey[k][key].toFixed(1)),
+    backgroundColor: color + "88", borderColor: color, borderWidth: 1,
+  });
+  weeklyChart?.destroy();
+  weeklyChart = new Chart($("#weeklyChart"), {
+    type: "bar",
+    data: { labels: keys, datasets: [
+      ds("run",   "Бег",       "#7ee08a"),
+      ds("bike",  "Велосипед", "#58a6ff"),
+      ds("other", "Прочее",    "#c9a15a"),
+    ]},
+    options: { plugins: { legend: { labels: { color: "#d7dee6", boxWidth: 12 } } },
+      scales: { x: { stacked: true, ticks: { color: "#7d8b99" }, grid: { color: "#242d37" } },
+                y: { stacked: true, ticks: { color: "#7d8b99" }, grid: { color: "#242d37" },
+                     title: { display: true, text: "км", color: "#7d8b99" } } } }
+  });
+}
+
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".seg button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  aggPeriod = b.dataset.p;
+  loadWeekly();
+});
+
+let map = null, trackLayer = null;
+
+function drawTrack(tps, color) {
+  const pts = tps.filter(t => t.lat != null && t.lon != null)
+                 .map(t => [t.lat, t.lon]);
+  const el = $("#map");
+  if (pts.length < 2) { el.hidden = true; return; }
+  el.hidden = false;
+  if (!map) {
+    map = L.map("map", { zoomControl: true, attributionControl: false });
+    L.control.attribution({ prefix: false, position: "bottomright" })
+      .addAttribution('© OpenStreetMap © CARTO').addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+  }
+  trackLayer?.remove();
+  trackLayer = L.layerGroup([
+    L.polyline(pts, { color, weight: 3, opacity: 0.9 }),
+    L.circleMarker(pts[0], { radius: 6, color: "#7ee08a", fillColor: "#7ee08a",
+                             fillOpacity: 1, weight: 2 }).bindTooltip("Старт"),
+    L.circleMarker(pts[pts.length - 1], { radius: 6, color: "#e05c5c", fillColor: "#e05c5c",
+                             fillOpacity: 1, weight: 2 }).bindTooltip("Финиш"),
+  ]).addTo(map);
+  map.invalidateSize();               // контейнер был hidden — пересчитать размеры
+  map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
+}
+
+async function showActivity(id) {
+  selectedId = id;
+  const [act, tps] = await Promise.all([
+    (await fetch(`/api/activities/${id}`)).json(),
+    (await fetch(`/api/activities/${id}/trackpoints?step=3`)).json(),
+  ]);
+  $("#placeholder").hidden = true;
+  $("#detail").hidden = false;
+  const sc = catColor(act);
+  $("#detailTitle").innerHTML =
+    `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${sc};margin-right:7px"></span>` +
+    `${esc(act.sport)} · ${fmtDate(act.start_time)}`;
+  $("#stats").innerHTML = `
+    <div class="stat dst"><b style="color:${sc}">${((act.distance_m||0)/1000).toFixed(2)}</b><span>км</span></div>
+    <div class="stat"><b>${fmtDur(act.duration_s)}</b><span>время</span></div>
+    <div class="stat spd"><b>${pace(act.duration_s, act.distance_m)}</b><span>темп</span></div>
+    <div class="stat hr"><b>${act.hr_avg ? Math.round(act.hr_avg) : "—"}</b><span>ср. пульс</span></div>
+    <div class="stat hr"><b>${act.hr_max ? Math.round(act.hr_max) : "—"}</b><span>макс. пульс</span></div>
+    <div class="stat"><b>${act.calories ?? "—"}</b><span>ккал</span></div>
+    <div class="stat"><b>${act.ascent_m ? Math.round(act.ascent_m) : "—"}</b><span>набор, м</span></div>`;
+
+  drawTrack(tps, sc);
+
+  $("#notes").value = act.notes || "";
+  $("#notesStatus").textContent = "";
+  renderPhotos(act.photos || []);
+
+  const labels = tps.map(t => ((t.distance ?? 0)/1000).toFixed(2));
+  const speedKmh = tps.map(t => t.speed != null ? +(t.speed*3.6).toFixed(1) : null);
+  actChart?.destroy();
+  actChart = new Chart($("#actChart"), {
+    type: "line",
+    data: { labels, datasets: [
+      { label: "Пульс", data: tps.map(t => t.hr), borderColor: "#e05c5c",
+        pointRadius: 0, borderWidth: 1.5, yAxisID: "hr", spanGaps: true },
+      { label: "Скорость, км/ч", data: speedKmh, borderColor: "#58a6ff",
+        pointRadius: 0, borderWidth: 1.2, yAxisID: "spd", spanGaps: true, hidden: !speedKmh.some(v => v) },
+      { label: "Высота, м", data: tps.map(t => t.elevation), borderColor: "#4d5a48",
+        backgroundColor: "#4d5a4833", fill: true, pointRadius: 0, borderWidth: 1,
+        yAxisID: "elev", spanGaps: true },
+    ]},
+    options: {
+      animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { color: "#d7dee6" } } },
+      scales: {
+        x: { title: { display: true, text: "км", color: "#7d8b99" },
+             ticks: { color: "#7d8b99", maxTicksLimit: 12 }, grid: { color: "#242d37" } },
+        hr:  { position: "left", ticks: { color: "#e05c5c" }, grid: { color: "#242d37" } },
+        spd: { position: "right", ticks: { color: "#58a6ff" }, grid: { drawOnChartArea: false } },
+        elev:{ display: false },
+      }
+    }
+  });
+  loadList();
+}
+
+$("#delBtn").onclick = async () => {
+  if (!selectedId || !confirm("Удалить тренировку?")) return;
+  await fetch(`/api/activities/${selectedId}`, { method: "DELETE" });
+  selectedId = null;
+  $("#detail").hidden = true; $("#placeholder").hidden = false;
+  loadList(); loadWeekly();
+};
+
+$("#notesSave").onclick = async () => {
+  if (!selectedId) return;
+  await fetch(`/api/activities/${selectedId}/notes`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: $("#notes").value }),
+  });
+  $("#notesStatus").textContent = "сохранено";
+  setTimeout(() => $("#notesStatus").textContent = "", 2000);
+};
+
+function renderPhotos(photos) {
+  const grid = $("#photoGrid");
+  grid.innerHTML = "";
+  for (const p of photos) {
+    const el = document.createElement("div");
+    el.className = "ph";
+    const media = p.kind === "video"
+      ? `<video src="/api/photos/${p.id}" preload="metadata" muted></video><span class="play">▶</span>`
+      : `<img src="/api/photos/${p.id}?thumb=1" loading="lazy" alt="">`;
+    el.innerHTML = `${media}<button title="удалить">×</button>`;
+    const m = el.querySelector("img, video");
+    if (m) m.onclick = () => window.open(`/api/photos/${p.id}`, "_blank");
+    el.querySelector("button").onclick = async () => {
+      if (!confirm("Удалить фото?")) return;
+      await fetch(`/api/photos/${p.id}`, { method: "DELETE" });
+      el.remove();
+    };
+    grid.appendChild(el);
+  }
+}
+
+$("#photoInput").onchange = async e => {
+  for (const f of e.target.files) {
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch(`/api/activities/${selectedId}/photos`, { method: "POST", body: fd });
+    if (!r.ok) alert(`${f.name}: ${await errText(r)}`);
+  }
+  e.target.value = "";
+  showActivity(selectedId);
+};
+
+async function uploadFiles(files) {
+  for (const f of files) {
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!r.ok) alert(`${f.name}: ${await errText(r)}`);
+  }
+  loadList(); loadWeekly();
+}
+const drop = $("#drop");
+drop.onclick = () => $("#fileInput").click();
+$("#fileInput").onchange = e => uploadFiles(e.target.files);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("hover"); };
+drop.ondragleave = () => drop.classList.remove("hover");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hover"); uploadFiles(e.dataTransfer.files); };
+
+loadList(); loadWeekly();
+</script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+# Kilometrika — вью для дашборда Home Assistant (современный layout sections/tile,
+# как остальные твои дашборды). Подключение: Settings -> Dashboards -> твой дашборд ->
+# карандаш -> три точки -> Raw configuration editor -> добавить это как элемент списка views.
+
+title: Тренировки
+path: kilometrika
+icon: mdi:run-fast
+type: sections
+max_columns: 3
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Бег
+        heading_style: title
+        icon: mdi:run
+      - type: tile
+        entity: sensor.beg_za_nedeliu
+        name: Неделя
+        color: green
+      - type: tile
+        entity: sensor.beg_za_mesiats
+        name: Месяц
+        color: green
+      - type: tile
+        entity: sensor.beg_za_god
+        name: Год
+        color: green
+      - type: tile
+        entity: sensor.posledniaia_probezhka
+        name: Последняя
+        color: green
+        state_content: [state, last_changed]
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Велосипед
+        heading_style: title
+        icon: mdi:bike
+      - type: tile
+        entity: sensor.velo_za_nedeliu
+        name: Неделя
+        color: blue
+      - type: tile
+        entity: sensor.velo_za_mesiats
+        name: Месяц
+        color: blue
+      - type: tile
+        entity: sensor.velo_za_god
+        name: Год
+        color: blue
+      - type: tile
+        entity: sensor.poslednii_zaezd
+        name: Последний
+        color: blue
+        state_content: [state, last_changed]
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Километрика
+        heading_style: title
+        icon: mdi:chart-line
+      - type: picture
+        image: "http://192.168.1.7:8000/api/frame.png"
+        tap_action:
+          action: url
+          url_path: "http://192.168.1.7:8000"
+        alt_text: Карточка тренировок
+      - type: history-graph
+        title: Недельный километраж
+        hours_to_show: 720
+        entities:
+          - entity: sensor.beg_za_nedeliu
+            name: Бег
+          - entity: sensor.velo_za_nedeliu
+            name: Вело
+      - type: tile
+        entity: sensor.vsego_trenirovok
+        name: Всего тренировок

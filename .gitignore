@@ -1,0 +1,9 @@
+# runtime data — never commit workouts or the database
+data/
+*.db
+*.tcx
+
+__pycache__/
+*.pyc
+venv/
+.env

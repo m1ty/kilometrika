@@ -1,0 +1,7 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+tcxreader==0.4.*
+paho-mqtt==2.1.*
+python-multipart==0.0.*
+pillow==11.*
+gpxpy==1.6.*

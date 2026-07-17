@@ -1,0 +1,18 @@
+services:
+  tcx-analyzer:
+    build: .
+    container_name: tcx-analyzer
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data          # tcx.db + inbox/archive/failed
+    environment:
+      WATCH_INTERVAL: "30"    # сек, период сканирования /data/inbox
+      TZ: "Europe/Amsterdam"  # локальный пояс для дат на дашборде и рамке
+      # --- опционально: публикация в MQTT для Home Assistant ---
+      # MQTT_HOST: "192.168.1.x"
+      # MQTT_PORT: "1883"
+      # MQTT_USER: "mqtt"
+      # MQTT_PASS: "secret"
+      # MQTT_PREFIX: "tcx_analyzer"
