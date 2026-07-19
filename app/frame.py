@@ -22,7 +22,16 @@ def _local(iso: str) -> datetime:
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 800, 480
-RENDER_VERSION = 8   # менять при правках макета — форсирует перерисовку рамки
+RENDER_VERSION = 9   # менять при правках макета — форсирует перерисовку рамки
+
+FRAME_LANG = os.environ.get("FRAME_LANG", "ru")   # язык кадра: ru | en
+_L10N = {
+    "ru": {"week": "Неделя", "month": "Месяц", "year": "Год",
+           "km": "км", "empty": "Нет тренировок"},
+    "en": {"week": "Week", "month": "Month", "year": "Year",
+           "km": "km", "empty": "No workouts yet"},
+}
+L = _L10N[FRAME_LANG]
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -120,23 +129,23 @@ def _draw_half(img: Image.Image, d: ImageDraw.ImageDraw, x0: int, x1: int,
         v = _fmt_km((last["distance_m"] or 0) / 1000)
         f_big = _font(72)
         vw = d.textlength(v, font=f_big)
-        kmw = d.textlength("км", font=_font(28))
+        kmw = d.textlength(L["km"], font=_font(28))
         sx = tcx - (vw + 8 + kmw) / 2
         d.text((sx, 118), v, font=f_big, fill=color)
-        d.text((sx + vw + 8, 162), "км", font=_font(28), fill=BLACK)
+        d.text((sx + vw + 8, 162), L["km"], font=_font(28), fill=BLACK)
     else:
         d.text((tcx, 130), "—", font=_font(56), fill=BLACK, anchor="ma")
 
     # ── низ: календарные итоги ──
     d.line([x0 + 40, 300, x1 - 40, 300], fill=BLACK, width=1)
-    cols = [("Неделя", totals["week"]), ("Месяц", totals["month"]),
-            ("Год", totals["year"])]
+    cols = [(L["week"], totals["week"]), (L["month"], totals["month"]),
+            (L["year"], totals["year"])]
     cw = (x1 - x0) / 3
     for i, (label, km) in enumerate(cols):
         ccx = x0 + cw * i + cw / 2
         d.text((ccx, 330), label, font=_font(20, False), fill=BLACK, anchor="ma")
         d.text((ccx, 360), _fmt_km(km), font=_font(38), fill=color, anchor="ma")
-        d.text((ccx, 412), "км", font=_font(18, False), fill=BLACK, anchor="ma")
+        d.text((ccx, 412), L["km"], font=_font(18, False), fill=BLACK, anchor="ma")
 
 
 def render_frame(store) -> bytes:
@@ -145,7 +154,7 @@ def render_frame(store) -> bytes:
     d = ImageDraw.Draw(img)
 
     if not acts:
-        d.text((W // 2, H // 2), "Нет тренировок", font=_font(36),
+        d.text((W // 2, H // 2), L["empty"], font=_font(36),
                fill=BLACK, anchor="mm")
         return _png(img)
 
@@ -170,4 +179,4 @@ def frame_etag(store) -> str:
     last_id = max(a["id"] for a in acts) if acts else 0
     now = datetime.now()
     week = now.isocalendar()[1]
-    return f'"v{RENDER_VERSION}-{last_id}-{len(acts)}-{now:%Y%m}-w{week}"'
+    return f'"v{RENDER_VERSION}{FRAME_LANG}-{last_id}-{len(acts)}-{now:%Y%m}-w{week}"'

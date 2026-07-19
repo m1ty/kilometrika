@@ -112,6 +112,7 @@ Everything is environment variables:
 | `MQTT_PORT` | `1883` | |
 | `MQTT_USER` / `MQTT_PASS` | *(empty)* | |
 | `MQTT_PREFIX` | `tcx_analyzer` | topic prefix |
+| `FRAME_LANG` | `ru` | e-ink card language: `ru` or `en` |
 
 ## API
 
@@ -132,6 +133,8 @@ GET    /api/frame.png                           e-ink stats card (ETag / 304)
 ## The e-ink frame
 
 The photo above is a 7.3" Waveshare Spectra 6 (E6) e-ink photo frame ([available on AliExpress](https://aliexpress.ru/item/1005010466222338.html)) running the open-source [esp32-photoframe](https://github.com/aitjcize/esp32-photoframe) firmware. Point its *Auto-Rotate URL* at `http://<kilometrika-host>:8000/api/frame.png` and it redraws itself whenever a new workout is imported — the endpoint serves an ETag, so the frame skips refresh cycles (and saves battery) when nothing changed. Calendar counters reset on Mondays and on the 1st automatically.
+
+Card labels are in Russian by default; set `FRAME_LANG=en` to render them in English (Week / Month / Year, km).
 
 ## Home Assistant integration
 

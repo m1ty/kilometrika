@@ -10,6 +10,7 @@ services:
     environment:
       WATCH_INTERVAL: "30"    # сек, период сканирования /data/inbox
       TZ: "Europe/Amsterdam"  # локальный пояс для дат на дашборде и рамке
+      # FRAME_LANG: "en"      # язык карточки рамки: ru (по умолчанию) | en
       # --- опционально: публикация в MQTT для Home Assistant ---
       # MQTT_HOST: "192.168.1.x"
       # MQTT_PORT: "1883"
