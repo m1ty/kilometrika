@@ -44,6 +44,16 @@
   }
   #drop.hover, #drop:hover { border-color: var(--accent); color: var(--accent); }
 
+  .yhead {
+    display: flex; align-items: center; gap: 8px; padding: 8px;
+    cursor: pointer; user-select: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .yhead:hover { background: rgba(255,255,255,.03); }
+  .yhead .chev { color: var(--dim); font-size: 11px; width: 12px; }
+  .yhead .ysum { margin-left: auto; color: var(--dim); font-size: 12px; }
+  .yhead .ykm { color: var(--accent); }
+  .ybody .act { padding-left: 26px; }
   .act {
     padding: 10px 8px; border-bottom: 1px solid var(--line);
     cursor: pointer; display: flex; justify-content: space-between; gap: 8px;
@@ -211,18 +221,49 @@ const pace = (dur, dist) => {
   return `${m}:${String(s).padStart(2,"0")} /км`;
 };
 
+// свёрнутость годов в списке; для годов без записи — развёрнут только текущий
+const YEARS_KEY = "kmYearsOpen";
+const yearsOpen = JSON.parse(localStorage.getItem(YEARS_KEY) || "{}");
+
 async function loadList() {
   const acts = await (await fetch("/api/activities")).json();
   $("#counter").textContent = acts.length + " активностей";
-  $("#list").innerHTML = acts.length ? "" : '<div class="muted">Пока пусто</div>';
+  const list = $("#list");
+  list.innerHTML = acts.length ? "" : '<div class="muted">Пока пусто</div>';
+  const groups = new Map();          // acts отсортированы по дате DESC — годы тоже
   for (const a of acts) {
-    const el = document.createElement("div");
-    el.className = "act" + (a.id === selectedId ? " sel" : "");
-    el.style.setProperty("--sport-c", catColor(a));
-    el.innerHTML = `<div>${fmtDate(a.start_time)}<div class="sport">${esc(a.sport)}</div></div>
-                    <div class="dist">${((a.distance_m||0)/1000).toFixed(1)} км</div>`;
-    el.onclick = () => showActivity(a.id);
-    $("#list").appendChild(el);
+    const y = a.start_time ? new Date(asUTC(a.start_time)).getFullYear() : "без даты";
+    if (!groups.has(y)) groups.set(y, []);
+    groups.get(y).push(a);
+  }
+  const nowY = new Date().getFullYear();
+  for (const [y, items] of groups) {
+    const open = yearsOpen[y] ?? (y === nowY);
+    const km = items.reduce((s, a) => s + (a.distance_m || 0), 0) / 1000;
+    const head = document.createElement("div");
+    head.className = "yhead";
+    head.innerHTML = `<span class="chev">${open ? "▾" : "▸"}</span><b>${y}</b>
+      <span class="ysum">${items.length} трен. · <span class="ykm">${km.toFixed(0)} км</span></span>`;
+    const body = document.createElement("div");
+    body.className = "ybody";
+    body.hidden = !open;
+    head.onclick = () => {
+      body.hidden = !body.hidden;
+      head.querySelector(".chev").textContent = body.hidden ? "▸" : "▾";
+      yearsOpen[y] = !body.hidden;
+      localStorage.setItem(YEARS_KEY, JSON.stringify(yearsOpen));
+    };
+    for (const a of items) {
+      const el = document.createElement("div");
+      el.className = "act" + (a.id === selectedId ? " sel" : "");
+      el.style.setProperty("--sport-c", catColor(a));
+      el.innerHTML = `<div>${fmtDate(a.start_time)}<div class="sport">${esc(a.sport)}</div></div>
+                      <div class="dist">${((a.distance_m||0)/1000).toFixed(1)} км</div>`;
+      el.onclick = () => showActivity(a.id);
+      body.appendChild(el);
+    }
+    list.appendChild(head);
+    list.appendChild(body);
   }
 }
 
