@@ -44,6 +44,13 @@
   }
   #drop.hover, #drop:hover { border-color: var(--accent); color: var(--accent); }
 
+  .split {
+    display: grid; grid-template-columns: 40px 54px 1fr 60px;
+    gap: 10px; align-items: center; padding: 3px 0; font-size: 13px;
+  }
+  .split .bar { height: 12px; border-radius: 6px; background: var(--sport-c, var(--accent)); }
+  .split .elev { color: var(--dim); text-align: right; }
+  .split.head { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
   .yhead {
     display: flex; align-items: center; gap: 8px; padding: 8px;
     cursor: pointer; user-select: none;
@@ -168,6 +175,10 @@
       <div class="stats" id="stats"></div>
       <div id="map" hidden></div>
       <canvas id="actChart"></canvas>
+      <div class="sect" id="splitsSect" hidden>
+        <h2>По километрам</h2>
+        <div id="splits" class="mono"></div>
+      </div>
       <div class="sect">
         <h2>Впечатления</h2>
         <textarea id="notes" rows="3" placeholder="Как прошла тренировка?"></textarea>
@@ -349,11 +360,32 @@ function drawTrack(tps, color) {
   map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
 }
 
+const fmtPace = s => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+
+function renderSplits(splits, color) {
+  const sect = $("#splitsSect"), box = $("#splits");
+  box.innerHTML = "";
+  sect.hidden = splits.length < 2;
+  if (sect.hidden) return;
+  const maxPace = Math.max(...splits.map(s => s.pace_s_km));
+  box.innerHTML = `<div class="split head"><span>км</span><span>темп</span><span></span><span class="elev">набор</span></div>`;
+  for (const s of splits) {
+    const el = document.createElement("div");
+    el.className = "split";
+    el.style.setProperty("--sport-c", color);
+    el.innerHTML = `<span>${s.km}</span><span>${fmtPace(s.pace_s_km)}</span>
+      <div class="bar" style="width:${Math.max(8, s.pace_s_km / maxPace * 100)}%"></div>
+      <span class="elev">${s.elev_gain_m ? Math.round(s.elev_gain_m) + " м" : "—"}</span>`;
+    box.appendChild(el);
+  }
+}
+
 async function showActivity(id) {
   selectedId = id;
-  const [act, tps] = await Promise.all([
+  const [act, tps, splits] = await Promise.all([
     (await fetch(`/api/activities/${id}`)).json(),
     (await fetch(`/api/activities/${id}/trackpoints?step=3`)).json(),
+    (await fetch(`/api/activities/${id}/splits`)).json(),
   ]);
   $("#placeholder").hidden = true;
   $("#detail").hidden = false;
@@ -371,6 +403,7 @@ async function showActivity(id) {
     <div class="stat"><b>${act.ascent_m ? Math.round(act.ascent_m) : "—"}</b><span>набор, м</span></div>`;
 
   drawTrack(tps, sc);
+  renderSplits(splits, sc);
 
   $("#notes").value = act.notes || "";
   $("#notesStatus").textContent = "";

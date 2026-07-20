@@ -118,3 +118,25 @@ def test_photo_thumbnail(client, tmp_path):
     vid = client.post("/api/activities/1/photos",
                       files={"file": ("c.mp4", io.BytesIO(mp4))}).json()["id"]
     assert client.get(f"/api/photos/{vid}?thumb=1").status_code == 200
+
+
+def test_splits_endpoint(client):
+    """Синтетический GPX 2.5 км ровным темпом 5:00/км: два полных километра
+    и хвост; темп восстанавливается интерполяцией границ."""
+    v = 1000 / 300                       # м/с при темпе 5:00/км
+    pts = []
+    for i in range(76):                  # 750 c => 2.5 км
+        t = i * 10
+        lat = 55.55 + v * t / 111320
+        pts.append(f'<trkpt lat="{lat:.6f}" lon="37.55"><ele>{100 + i * 0.1:.1f}</ele>'
+                   f'<time>2026-07-10T06:{t // 60:02d}:{t % 60:02d}Z</time></trkpt>')
+    gpx = ('<?xml version="1.0"?><gpx version="1.1" creator="t" '
+           'xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Running</name>'
+           f'<trkseg>{"".join(pts)}</trkseg></trk></gpx>').encode()
+    r = client.post("/api/upload", files={"file": ("run25.gpx", io.BytesIO(gpx))})
+    assert r.status_code == 200
+    s = client.get("/api/activities/1/splits").json()
+    assert [x["km"] for x in s] == [1.0, 2.0, 2.5]
+    assert all(abs(x["pace_s_km"] - 300) < 6 for x in s)
+    assert abs(s[-1]["dist_m"] - 500) < 30
+    assert s[0]["elev_gain_m"] > 0

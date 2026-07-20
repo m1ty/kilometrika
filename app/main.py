@@ -259,6 +259,46 @@ def trackpoints(act_id: int, step: int = 1):
     return out
 
 
+@app.get("/api/activities/{act_id}/splits")
+def splits(act_id: int, size: float = 1000):
+    """Разбивка по километрам (как Splits в Strava): темп и набор высоты.
+    Границы километров интерполируются между трекпоинтами; хвост короче
+    50 м отбрасывается."""
+    if not store.get_activity(act_id):
+        raise HTTPException(404, "not found")
+    tps = [t for t in store.get_trackpoints(act_id)
+           if t["distance"] is not None and t["time"]]
+    if len(tps) < 2:
+        return []
+    pts = [(t["distance"], datetime.fromisoformat(t["time"]).timestamp(),
+            t["elevation"]) for t in tps]
+    out = []
+    boundary = size
+    t_cross_prev = pts[0][1]
+    gain = 0.0
+    for (d0, s0, e0), (d1, s1, e1) in zip(pts, pts[1:]):
+        if e0 is not None and e1 is not None and e1 > e0:
+            gain += e1 - e0
+        while d1 >= boundary and d1 > d0:
+            frac = (boundary - d0) / (d1 - d0)
+            t_cross = s0 + (s1 - s0) * frac
+            out.append({"km": round(boundary / 1000, 1), "dist_m": size,
+                        "time_s": round(t_cross - t_cross_prev, 1),
+                        "elev_gain_m": round(gain, 1)})
+            t_cross_prev = t_cross
+            gain = 0.0
+            boundary += size
+    d_last, s_last, _ = pts[-1]
+    rem = d_last - (boundary - size)
+    if rem > 50:
+        out.append({"km": round(d_last / 1000, 2), "dist_m": round(rem, 1),
+                    "time_s": round(s_last - t_cross_prev, 1),
+                    "elev_gain_m": round(gain, 1)})
+    for s in out:
+        s["pace_s_km"] = round(s["time_s"] / (s["dist_m"] / 1000), 1) if s["dist_m"] else None
+    return out
+
+
 @app.delete("/api/activities/{act_id}")
 def delete(act_id: int):
     store.delete_activity(act_id)
