@@ -59,7 +59,6 @@
   .yhead:hover { background: rgba(255,255,255,.03); }
   .yhead .chev { color: var(--dim); font-size: 11px; width: 12px; }
   .yhead .ysum { margin-left: auto; color: var(--dim); font-size: 12px; }
-  .yhead .ykm { color: var(--accent); }
   .ybody .act { padding-left: 26px; }
   .act {
     padding: 10px 8px; border-bottom: 1px solid var(--line);
@@ -255,11 +254,15 @@ async function loadList() {
   const nowY = new Date().getFullYear();
   for (const [y, items] of groups) {
     const open = yearsOpen[y] ?? (y === nowY);
-    const km = items.reduce((s, a) => s + (a.distance_m || 0), 0) / 1000;
+    const kmBy = { run: 0, bike: 0, other: 0 };
+    for (const a of items) kmBy[sportCat(a)] += (a.distance_m || 0) / 1000;
+    const parts = ["run", "bike", "other"]
+      .filter(c => kmBy[c] >= 0.05)
+      .map(c => `<span style="color:${CAT_COLORS[c]}">${kmBy[c].toFixed(0)}</span>`);
     const head = document.createElement("div");
     head.className = "yhead";
     head.innerHTML = `<span class="chev">${open ? "▾" : "▸"}</span><b>${y}</b>
-      <span class="ysum">${items.length} трен. · <span class="ykm">${km.toFixed(0)} км</span></span>`;
+      <span class="ysum">${items.length} трен. · ${parts.join(" · ") || 0} км</span>`;
     const body = document.createElement("div");
     body.className = "ybody";
     body.hidden = !open;
