@@ -77,3 +77,23 @@ def test_broken_file_raises():
 def test_unsupported_extension_rejected():
     with pytest.raises(ValueError, match="unsupported format"):
         parse_activity("/tmp/whatever.fit")
+
+
+def test_gpx_route_without_timestamps(tmp_path):
+    """AllTrails и подобные экспортируют маршруты без <time>: дистанция
+    считается по координатам, дата и длительность отсутствуют."""
+    gpx = tmp_path / "route.gpx"
+    gpx.write_text(
+        '<?xml version="1.0"?><gpx version="1.1" creator="AllTrails.com" '
+        'xmlns="http://www.topografix.com/GPX/1/1"><trk>'
+        '<name><![CDATA[Бег по Битце]]></name><trkseg>'
+        '<trkpt lat="55.6088" lon="37.5741"><ele>200</ele></trkpt>'
+        '<trkpt lat="55.6098" lon="37.5741"><ele>210</ele></trkpt>'
+        '<trkpt lat="55.6108" lon="37.5741"><ele>205</ele></trkpt>'
+        '</trkseg></trk></gpx>', encoding="utf-8")
+    act = parse_activity(str(gpx))
+    assert act.start_time is None and act.duration_s == 0.0
+    assert 200 < act.distance_m < 250          # 2 шага по ~111 м
+    assert act.category == "run"               # по названию трека
+    assert len(act.trackpoints) == 3
+    assert act.trackpoints[-1].distance == act.distance_m

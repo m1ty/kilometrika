@@ -210,15 +210,25 @@ def parse_gpx(path: str) -> Activity:
                     watts=None,
                 ))
 
-    tps = [t for t in tps if t.time is not None]
     if not tps:
-        raise ValueError("GPX has no timestamped trackpoints")
-    tps.sort(key=lambda t: t.time)
-    _fill_missing_from_gps(tps)
-
-    start = _as_utc(tps[0].time) if tps else None
-    duration = (tps[-1].time - tps[0].time).total_seconds() if len(tps) > 1 else 0.0
-    distance = tps[-1].distance if tps and tps[-1].distance else 0.0
+        raise ValueError("GPX has no trackpoints")
+    timed = [t for t in tps if t.time is not None]
+    if timed:
+        tps = sorted(timed, key=lambda t: t.time)
+        _fill_missing_from_gps(tps)
+        start = _as_utc(tps[0].time)
+        duration = (tps[-1].time - tps[0].time).total_seconds() if len(tps) > 1 else 0.0
+    else:
+        # маршрут без времени (AllTrails и т.п.): дистанция чисто по координатам,
+        # даты/темпа нет — календарную статистику такие записи не трогают
+        cum, prev = 0.0, None
+        for tp in tps:
+            if prev is not None and None not in (tp.lat, tp.lon, prev.lat, prev.lon):
+                cum += _haversine_m(prev.lat, prev.lon, tp.lat, tp.lon)
+            tp.distance = round(cum, 1)
+            prev = tp
+        start, duration = None, 0.0
+    distance = tps[-1].distance if tps[-1].distance else 0.0
     hrs = [t.hr for t in tps if t.hr]
     up, _down = gpx.get_uphill_downhill()
 

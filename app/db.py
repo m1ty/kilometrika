@@ -106,7 +106,7 @@ class Store:
                 """INSERT INTO trackpoints
                    (activity_id, time, lat, lon, elevation, distance, hr, cadence, speed, watts)
                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                [(act_id, tp.time.isoformat(), tp.lat, tp.lon, tp.elevation,
+                [(act_id, tp.time.isoformat() if tp.time else "", tp.lat, tp.lon, tp.elevation,
                   tp.distance, tp.hr, tp.cadence, tp.speed, tp.watts)
                  for tp in act.trackpoints],
             )
@@ -129,7 +129,7 @@ class Store:
     def get_trackpoints(self, act_id: int) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM trackpoints WHERE activity_id = ? ORDER BY time",
+                "SELECT * FROM trackpoints WHERE activity_id = ? ORDER BY time, rowid",
                 (act_id,),
             ).fetchall()
         return [dict(r) for r in rows]
