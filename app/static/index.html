@@ -168,9 +168,14 @@
       <canvas id="weeklyChart"></canvas>
     </div>
     <div class="panel" id="detail" hidden>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
         <h2 id="detailTitle" style="margin:0"></h2>
-        <button class="del" id="delBtn">удалить</button>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="seg" id="catSeg" title="категория тренировки">
+            <button data-c="run">Бег</button><button data-c="bike">Вел</button><button data-c="other">Прочее</button>
+          </div>
+          <button class="del" id="delBtn">удалить</button>
+        </div>
       </div>
       <div class="stats" id="stats"></div>
       <div id="map" hidden></div>
@@ -405,6 +410,9 @@ async function showActivity(id) {
   drawTrack(tps, sc);
   renderSplits(splits, sc);
 
+  document.querySelectorAll("#catSeg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.c === sportCat(act)));
+
   $("#notes").value = act.notes || "";
   $("#notesStatus").textContent = "";
   renderPhotos(act.photos || []);
@@ -437,6 +445,16 @@ async function showActivity(id) {
   });
   loadList();
 }
+
+document.querySelectorAll("#catSeg button").forEach(b => b.onclick = async () => {
+  if (!selectedId || b.classList.contains("on")) return;
+  await fetch(`/api/activities/${selectedId}/category`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category: b.dataset.c }),
+  });
+  showActivity(selectedId);       // перерисует детали и список
+  loadWeekly();
+});
 
 $("#delBtn").onclick = async () => {
   if (!selectedId || !confirm("Удалить тренировку?")) return;

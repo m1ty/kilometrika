@@ -309,6 +309,23 @@ def delete(act_id: int):
 
 
 
+class CategoryBody(BaseModel):
+    category: str
+
+
+@app.patch("/api/activities/{act_id}/category")
+def set_category(act_id: int, body: CategoryBody):
+    """Ручная смена категории — маршрутные GPX (AllTrails) не несут вид
+    спорта, да и эвристика по названию может ошибаться."""
+    if body.category not in ("run", "bike", "other"):
+        raise HTTPException(400, "category must be run | bike | other")
+    if not store.get_activity(act_id):
+        raise HTTPException(404, "not found")
+    store.set_category(act_id, body.category)
+    publish_mqtt_state()          # категория влияет на рамку и MQTT-итоги
+    return {"ok": True}
+
+
 class NotesBody(BaseModel):
     notes: str = ""
 

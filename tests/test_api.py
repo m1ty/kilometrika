@@ -140,3 +140,15 @@ def test_splits_endpoint(client):
     assert all(abs(x["pace_s_km"] - 300) < 6 for x in s)
     assert abs(s[-1]["dist_m"] - 500) < 30
     assert s[0]["elev_gain_m"] > 0
+
+
+def test_set_category(client):
+    _upload(client, "garmin_run.tcx")
+    assert client.get("/api/activities/1").json()["category"] == "run"
+    r = client.patch("/api/activities/1/category", json={"category": "bike"})
+    assert r.status_code == 200
+    assert client.get("/api/activities/1").json()["category"] == "bike"
+    assert client.patch("/api/activities/1/category",
+                        json={"category": "swim"}).status_code == 400
+    assert client.patch("/api/activities/99/category",
+                        json={"category": "run"}).status_code == 404

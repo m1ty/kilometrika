@@ -164,6 +164,11 @@ class Store:
 
     # ------------------------------------------------------------- notes & photos
 
+    def set_category(self, act_id: int, category: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE activities SET category = ? WHERE id = ?",
+                      (category, act_id))
+
     def set_notes(self, act_id: int, notes: str) -> None:
         with self._conn() as c:
             c.execute("UPDATE activities SET notes = ? WHERE id = ?", (notes, act_id))
