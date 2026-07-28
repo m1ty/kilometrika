@@ -4,7 +4,7 @@
 set -euo pipefail
 
 CT="${1:-130}"
-APP=/opt/tcx-analyzer/app
+APP=/opt/kilometrika/app
 
 cd "$(dirname "$0")"
 
@@ -24,11 +24,11 @@ find app -type f \( -name "*.py" -o -name "*.html" -o -name "*.css" -o -name "*.
 done
 
 echo "== restart =="
-pct exec "$CT" -- systemctl restart tcx-analyzer
+pct exec "$CT" -- systemctl restart kilometrika
 sleep 2
 
 echo "== проверка =="
-pct exec "$CT" -- systemctl is-active tcx-analyzer
+pct exec "$CT" -- systemctl is-active kilometrika
 n=$(pct exec "$CT" -- ls "$APP/static/vendor" 2>/dev/null | wc -l)
 echo "  vendor-файлов на месте: $n"
 code=$(pct exec "$CT" -- python3 -c "

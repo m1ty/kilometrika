@@ -1,13 +1,13 @@
 # Kilometrika -> Home Assistant: MQTT-сенсоры.
 # Подключение: в configuration.yaml добавь
 #   mqtt: !include kilometrika_sensors.yaml   # (или вложи секцию sensor в существующий блок mqtt)
-# Источник данных: retained-топик tcx_analyzer/state, публикуется при импорте и раз в час.
+# Источник данных: retained-топик kilometrika/state, публикуется при импорте и раз в час.
 
 sensor:
   # ── Бег ──────────────────────────────────────────────
   - name: "Бег за неделю"
     unique_id: kilometrika_run_week
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.run.week_km }}"
     unit_of_measurement: "km"
     icon: mdi:run
@@ -20,7 +20,7 @@ sensor:
 
   - name: "Бег за месяц"
     unique_id: kilometrika_run_month
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.run.month_km }}"
     unit_of_measurement: "km"
     icon: mdi:run
@@ -29,7 +29,7 @@ sensor:
 
   - name: "Бег за год"
     unique_id: kilometrika_run_year
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.run.year_km }}"
     unit_of_measurement: "km"
     icon: mdi:run
@@ -38,7 +38,7 @@ sensor:
 
   - name: "Последняя пробежка"
     unique_id: kilometrika_run_last
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.run.last_km }}"
     unit_of_measurement: "km"
     icon: mdi:shoe-sneaker
@@ -46,7 +46,7 @@ sensor:
 
   - name: "Последняя пробежка дата"
     unique_id: kilometrika_run_last_date
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.run.last_date | default('—') }}"
     icon: mdi:calendar
     device: *kilometrika_device
@@ -54,7 +54,7 @@ sensor:
   # ── Велосипед ────────────────────────────────────────
   - name: "Вело за неделю"
     unique_id: kilometrika_bike_week
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.bike.week_km }}"
     unit_of_measurement: "km"
     icon: mdi:bike
@@ -63,7 +63,7 @@ sensor:
 
   - name: "Вело за месяц"
     unique_id: kilometrika_bike_month
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.bike.month_km }}"
     unit_of_measurement: "km"
     icon: mdi:bike
@@ -72,7 +72,7 @@ sensor:
 
   - name: "Вело за год"
     unique_id: kilometrika_bike_year
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.bike.year_km }}"
     unit_of_measurement: "km"
     icon: mdi:bike
@@ -81,7 +81,7 @@ sensor:
 
   - name: "Последний заезд"
     unique_id: kilometrika_bike_last
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.bike.last_km }}"
     unit_of_measurement: "km"
     icon: mdi:bike-fast
@@ -89,7 +89,7 @@ sensor:
 
   - name: "Последний заезд дата"
     unique_id: kilometrika_bike_last_date
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.bike.last_date | default('—') }}"
     icon: mdi:calendar
     device: *kilometrika_device
@@ -97,7 +97,7 @@ sensor:
   # ── Общее ────────────────────────────────────────────
   - name: "Всего тренировок"
     unique_id: kilometrika_total
-    state_topic: "tcx_analyzer/state"
+    state_topic: "kilometrika/state"
     value_template: "{{ value_json.total_activities }}"
     icon: mdi:counter
     state_class: total_increasing

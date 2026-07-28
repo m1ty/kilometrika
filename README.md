@@ -59,33 +59,33 @@ Runs fine as a plain systemd service — handy in a Proxmox LXC where Docker-in-
 
 ```bash
 apt install -y python3-venv
-useradd -r -m -d /opt/tcx-analyzer -s /usr/sbin/nologin tcx
-# copy the repo into /opt/tcx-analyzer, then:
-cd /opt/tcx-analyzer
+useradd -r -m -d /opt/kilometrika -s /usr/sbin/nologin kilometrika
+# copy the repo into /opt/kilometrika, then:
+cd /opt/kilometrika
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-chown -R tcx:tcx /opt/tcx-analyzer
+chown -R kilometrika:kilometrika /opt/kilometrika
 ```
 
-`/etc/systemd/system/tcx-analyzer.service`:
+`/etc/systemd/system/kilometrika.service`:
 
 ```ini
 [Unit]
-Description=TCX Analyzer
+Description=Kilometrika
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=tcx
-Group=tcx
-WorkingDirectory=/opt/tcx-analyzer/app
-Environment=DATA_DIR=/opt/tcx-analyzer/data
-ExecStart=/opt/tcx-analyzer/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+User=kilometrika
+Group=kilometrika
+WorkingDirectory=/opt/kilometrika/app
+Environment=DATA_DIR=/opt/kilometrika/data
+ExecStart=/opt/kilometrika/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/tcx-analyzer/data
+ReadWritePaths=/opt/kilometrika/data
 PrivateTmp=true
 
 [Install]
@@ -93,12 +93,12 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-systemctl daemon-reload && systemctl enable --now tcx-analyzer
+systemctl daemon-reload && systemctl enable --now kilometrika
 ```
 
 Set the host timezone so dashboard and frame dates are shown local, not UTC: `timedatectl set-timezone Europe/Moscow` (or pass `TZ=` in the unit / docker-compose).
 
-If the watch folder is a CIFS/NFS mount, make sure the `tcx` user can **write** to it — the watcher moves files out of the inbox after import. In an unprivileged LXC, remember the uid shift: mount with `uid=<uid of tcx inside> + 100000`.
+If the watch folder is a CIFS/NFS mount, make sure the `kilometrika` user can **write** to it — the watcher moves files out of the inbox after import. In an unprivileged LXC, remember the uid shift: mount with `uid=<uid of kilometrika inside> + 100000`.
 
 ## Configuration
 
@@ -111,7 +111,7 @@ Everything is environment variables:
 | `MQTT_HOST` | *(empty = off)* | MQTT broker for the Home Assistant bridge |
 | `MQTT_PORT` | `1883` | |
 | `MQTT_USER` / `MQTT_PASS` | *(empty)* | |
-| `MQTT_PREFIX` | `tcx_analyzer` | topic prefix |
+| `MQTT_PREFIX` | `kilometrika` | topic prefix |
 | `FRAME_LANG` | `ru` | e-ink card language: `ru` or `en` |
 
 ## API
@@ -138,7 +138,7 @@ Card labels are in Russian by default; set `FRAME_LANG=en` to render them in Eng
 
 ## Home Assistant integration
 
-Set the `MQTT_*` variables; the service publishes a retained message to `tcx_analyzer/state` after every import **and hourly** (so calendar counters reset on Mondays and the 1st even without new workouts):
+Set the `MQTT_*` variables; the service publishes a retained message to `kilometrika/state` after every import **and hourly** (so calendar counters reset on Mondays and the 1st even without new workouts):
 
 ```json
 {
@@ -157,15 +157,15 @@ Categories and calendar boundaries (local timezone, ISO weeks) match the e-ink f
 mqtt:
   sensor:
     - name: "Run week distance"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.run.week_km }}"
       unit_of_measurement: "km"
     - name: "Bike week distance"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.bike.week_km }}"
       unit_of_measurement: "km"
     - name: "Last run"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.run.last_km }}"
       unit_of_measurement: "km"
 ```

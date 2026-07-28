@@ -1,4 +1,4 @@
-"""TCX Analyzer — FastAPI service.
+"""Kilometrika — FastAPI service.
 
 Ingestion paths:
   1. Web UI / POST /api/upload — drag & drop .tcx files
@@ -31,7 +31,7 @@ from db import Store
 from parser import SUPPORTED_EXTENSIONS, parse_activity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("tcx")
+log = logging.getLogger("kilometrika")
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 INBOX = DATA_DIR / "inbox"
@@ -44,7 +44,7 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_USER = os.environ.get("MQTT_USER", "")
 MQTT_PASS = os.environ.get("MQTT_PASS", "")
-MQTT_PREFIX = os.environ.get("MQTT_PREFIX", "tcx_analyzer")
+MQTT_PREFIX = os.environ.get("MQTT_PREFIX", "kilometrika")
 
 store: Store | None = None
 
@@ -201,7 +201,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="TCX Analyzer", lifespan=lifespan)
+app = FastAPI(title="Kilometrika", lifespan=lifespan)
 
 
 @app.post("/api/upload")

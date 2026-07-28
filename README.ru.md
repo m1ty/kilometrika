@@ -44,7 +44,7 @@ GET    /api/summary/weekly?weeks=12         — итоги по неделям
 
 ## Интеграция с Home Assistant (MQTT)
 
-Раскомментируй переменные `MQTT_*` в `docker-compose.yml`. После каждого импорта контейнер публикует retained-сообщение в `tcx_analyzer/state`:
+Раскомментируй переменные `MQTT_*` в `docker-compose.yml`. После каждого импорта контейнер публикует retained-сообщение в `kilometrika/state`:
 
 ```json
 {
@@ -64,15 +64,15 @@ GET    /api/summary/weekly?weeks=12         — итоги по неделям
 mqtt:
   sensor:
     - name: "Последняя тренировка, км"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.last_distance_km }}"
       unit_of_measurement: "km"
     - name: "Километраж за неделю"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.week_distance_km }}"
       unit_of_measurement: "km"
     - name: "Средний пульс последней тренировки"
-      state_topic: "tcx_analyzer/state"
+      state_topic: "kilometrika/state"
       value_template: "{{ value_json.last_hr_avg }}"
       unit_of_measurement: "bpm"
 ```
