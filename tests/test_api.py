@@ -1,5 +1,6 @@
 """API поверх FastAPI TestClient: загрузка, дедуп, заметки, фото, кадр рамки."""
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -152,3 +153,28 @@ def test_set_category(client):
                         json={"category": "swim"}).status_code == 400
     assert client.patch("/api/activities/99/category",
                         json={"category": "run"}).status_code == 404
+
+
+def test_mqtt_publishes_stats_even_if_frame_render_fails(client, monkeypatch):
+    """Падение рендера кадра (нет Pillow/шрифтов) не должно лишать
+    Home Assistant цифр — состояние публикуется в любом случае."""
+    import paho.mqtt.publish as mqtt_publish
+
+    import frame
+    import main
+
+    _upload(client, "garmin_run.tcx")
+    sent = []
+
+    def boom(_store):
+        raise RuntimeError("No module named 'PIL'")
+
+    monkeypatch.setattr(main, "MQTT_HOST", "broker.invalid")
+    monkeypatch.setattr(frame, "render_frame", boom)
+    monkeypatch.setattr(mqtt_publish, "multiple", lambda msgs, **kw: sent.extend(msgs))
+
+    main.publish_mqtt_state()
+
+    topics = [m["topic"] for m in sent]
+    assert topics == [f"{main.MQTT_PREFIX}/state"]
+    assert "run" in json.loads(sent[0]["payload"])

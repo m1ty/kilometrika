@@ -174,16 +174,22 @@ def publish_mqtt_state():
         import paho.mqtt.publish as mqtt_publish
         payload = build_mqtt_payload()
         auth = {"username": MQTT_USER, "password": MQTT_PASS} if MQTT_USER else None
-        from frame import render_frame
         msgs = [
             {"topic": f"{MQTT_PREFIX}/state",
              "payload": json.dumps(payload, ensure_ascii=False), "retain": True},
-            # PNG кадра — для MQTT-камеры в Home Assistant (~30-50 КБ, retained)
-            {"topic": f"{MQTT_PREFIX}/frame",
-             "payload": render_frame(store), "retain": True},
         ]
+        # PNG кадра — для MQTT-камеры в Home Assistant (~30-50 КБ, retained).
+        # Рендер отделён от статистики: если он упадёт (нет Pillow, нет шрифтов),
+        # цифры в HA всё равно обновятся — молчать будет только картинка.
+        try:
+            import frame
+            msgs.append({"topic": f"{MQTT_PREFIX}/frame",
+                         "payload": frame.render_frame(store), "retain": True})
+        except Exception as e:
+            log.warning("frame render failed, publishing stats only: %s", e)
         mqtt_publish.multiple(msgs, hostname=MQTT_HOST, port=MQTT_PORT, auth=auth)
-        log.info("published state+frame to mqtt %s/%s", MQTT_HOST, MQTT_PREFIX)
+        log.info("published %s to mqtt %s/%s",
+                 "state+frame" if len(msgs) > 1 else "state", MQTT_HOST, MQTT_PREFIX)
     except Exception as e:
         log.warning("mqtt publish failed: %s", e)
 

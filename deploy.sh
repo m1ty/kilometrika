@@ -4,7 +4,8 @@
 set -euo pipefail
 
 CT="${1:-130}"
-APP=/opt/kilometrika/app
+BASE=/opt/kilometrika
+APP="$BASE/app"
 
 cd "$(dirname "$0")"
 
@@ -22,6 +23,20 @@ find app -type f \( -name "*.py" -o -name "*.html" -o -name "*.css" -o -name "*.
     pct push "$CT" "$f" "$APP/$rel"
     echo "  $rel"
 done
+
+echo "== зависимости =="
+# requirements.txt тоже едет в контейнер: иначе пересоздание venv там ставит
+# библиотеки по устаревшему списку (так однажды потерялся Pillow)
+local_sum=$(md5sum requirements.txt | cut -d' ' -f1)
+remote_sum=$(pct exec "$CT" -- md5sum "$BASE/requirements.txt" 2>/dev/null | cut -d' ' -f1 || true)
+if [ "$local_sum" != "$remote_sum" ]; then
+    pct push "$CT" requirements.txt "$BASE/requirements.txt"
+    pct exec "$CT" -- "$BASE/venv/bin/pip" install -q -r "$BASE/requirements.txt"
+    pct exec "$CT" -- chown -R tcx:tcx "$BASE/venv"
+    echo "  список обновлён, зависимости доустановлены"
+else
+    echo "  без изменений"
+fi
 
 echo "== restart =="
 pct exec "$CT" -- systemctl restart kilometrika
