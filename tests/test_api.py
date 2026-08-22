@@ -73,6 +73,20 @@ def test_photos_roundtrip(client):
     assert client.delete(f"/api/photos/{pid}").json()["ok"]
 
 
+def test_media_keeps_original_name_and_bytes(client):
+    """Файл возвращается байт-в-байт (метаданные целы) и под своим именем —
+    включая кириллицу, иначе браузер сохранит его как номер из URL."""
+    from urllib.parse import unquote
+    _upload(client, "garmin_run.tcx")
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+    for name in ("IMG_20130509_132600.png", "Пробежка у канала.png"):
+        pid = client.post("/api/activities/1/photos",
+                          files={"file": (name, io.BytesIO(png))}).json()["id"]
+        r = client.get(f"/api/photos/{pid}")
+        assert r.content == png, "оригинал обязан отдаваться без перекодирования"
+        assert name in unquote(r.headers["content-disposition"])
+
+
 def test_frame_png_and_etag(client):
     _upload(client, "garmin_run.tcx")
     r = client.get("/api/frame.png")

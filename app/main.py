@@ -376,6 +376,12 @@ def thumb_path(orig: Path) -> Path:
     return orig.parent / ".thumb" / (orig.stem + ".jpg")
 
 
+def media_response(path: Path, name: str) -> FileResponse:
+    """Отдаём под оригинальным именем: inline — просмотр в браузере,
+    но «Сохранить как» подставит имя файла, а не номер из URL."""
+    return FileResponse(path, filename=name, content_disposition_type="inline")
+
+
 @app.post("/api/activities/{act_id}/photos")
 async def add_photo(act_id: int, file: UploadFile):
     if not store.get_activity(act_id):
@@ -421,10 +427,10 @@ def get_photo(photo_id: int, thumb: int = 0):
         if not tp.exists() and path.exists():
             make_thumb(path)              # ленивая генерация для старых фото
         if tp.exists():
-            return FileResponse(tp)
+            return media_response(tp, tp.name)
     if not path.exists():
         raise HTTPException(404, "file missing")
-    return FileResponse(path)
+    return media_response(path, ph["filename"])
 
 
 @app.delete("/api/photos/{photo_id}")
