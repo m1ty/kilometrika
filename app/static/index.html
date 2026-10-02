@@ -101,6 +101,10 @@
     border: 1px solid var(--line); background: var(--bg);
   }
   .leaflet-container { font: inherit; }
+  /* тайлы OSM светлые — затемняем под тему */
+  #map .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9) saturate(.6);
+  }
   .leaflet-control-attribution {
     background: rgba(16,20,24,.55) !important;
     color: #5a6672 !important;
@@ -351,8 +355,8 @@ function drawTrack(tps, color) {
   if (!map) {
     map = L.map("map", { zoomControl: true, attributionControl: false });
     L.control.attribution({ prefix: false, position: "bottomright" })
-      .addAttribution('© OpenStreetMap © CARTO').addTo(map);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      .addAttribution('© OpenStreetMap').addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
     }).addTo(map);
   }
