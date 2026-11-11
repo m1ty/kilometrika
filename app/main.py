@@ -19,11 +19,12 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -68,7 +69,7 @@ def ingest_file(path: Path, orig_name: str | None = None) -> dict:
         raise DuplicateError(f"duplicate: {name} already imported")
     log.info("imported %s -> activity #%d (%s, %.1f km)",
              name, act_id, act.sport, act.distance_m / 1000)
-    publish_mqtt_state()
+    schedule_mqtt_publish()
     return {"id": act_id, "sport": act.sport, "distance_m": act.distance_m}
 
 
@@ -83,11 +84,66 @@ def move_safe(src: Path, dst_dir: Path, dst_name: str | None = None) -> None:
     shutil.move(str(src), dst)
 
 
+def inbox_files() -> list[Path]:
+    """Файлы поддерживаемых форматов. Расширение сравниваем без учёта регистра:
+    glob('*.tcx') на Linux не видит ACTIVITY.TCX, и такой файл лежал бы вечно."""
+    return sorted(f for f in INBOX.iterdir()
+                  if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS)
+
+
+async def scan_inbox(stuck: set[tuple[str, float]],
+                     pending: dict[str, tuple[int, float]]) -> None:
+    """Один проход по инбоксу.
+
+    stuck   — (path, mtime) файлов, которые не удалось вынести из инбокса
+              (например, CIFS только на чтение): не импортируем их по кругу.
+    pending — размер и mtime файлов с прошлого прохода. Файл берём в работу,
+              только если он не менялся целый интервал: медленная копия по
+              SMB/FTP с паузами иначе уезжала в failed/ недописанной.
+    """
+    seen: set[tuple[str, float]] = set()
+    waiting: dict[str, tuple[int, float]] = {}
+    for f in inbox_files():
+        try:
+            st = f.stat()
+        except OSError:                  # исчез между листингом и stat
+            continue
+        key = (str(f), st.st_mtime)
+        seen.add(key)
+        if key in stuck:
+            continue
+        sig = (st.st_size, st.st_mtime)
+        if pending.get(str(f)) != sig:   # новый или ещё пишется — ждём проход
+            waiting[str(f)] = sig
+            continue
+
+        dest = ARCHIVE
+        try:
+            await asyncio.to_thread(ingest_file, f)
+        except DuplicateError as e:
+            log.warning("%s", e)
+        except Exception as e:
+            log.error("failed to parse %s: %s", f.name, e)
+            dest = FAILED
+
+        try:
+            await asyncio.to_thread(move_safe, f, dest)
+        except OSError as e:
+            log.warning(
+                "cannot move %s out of inbox (%s) — check write "
+                "permissions on the mount (uid mapping); "
+                "file imported but left in place", f.name, e)
+            stuck.add(key)
+    stuck &= seen            # забываем файлы, которых больше нет в инбоксе
+    pending.clear()
+    pending.update(waiting)
+
+
 async def watch_inbox():
     """Poll the inbox folder; no inotify needed — works on any mount.
-    Resilient: never lets an exception kill the task, and remembers files
-    it can't move out (e.g. read-only CIFS mount) to avoid re-import loops."""
-    stuck: set[tuple[str, float]] = set()   # (path, mtime) we failed to move
+    Resilient: never lets an exception kill the task."""
+    stuck: set[tuple[str, float]] = set()
+    pending: dict[str, tuple[int, float]] = {}
     last_publish = 0.0
 
     while True:
@@ -95,43 +151,7 @@ async def watch_inbox():
             if time.monotonic() - last_publish > 3600:   # раз в час
                 await asyncio.to_thread(publish_mqtt_state)
                 last_publish = time.monotonic()
-            files = [f for ext in SUPPORTED_EXTENSIONS for f in INBOX.glob(f"*{ext}")]
-            seen: set[tuple[str, float]] = set()
-            for f in sorted(files):
-                try:
-                    st = f.stat()
-                except OSError:                  # исчез между glob и stat
-                    continue
-                key = (str(f), st.st_mtime)
-                seen.add(key)
-                if key in stuck:
-                    continue
-                # skip files still being written (size changing)
-                await asyncio.sleep(1)
-                try:
-                    if f.stat().st_size != st.st_size:
-                        continue
-                except OSError:
-                    continue
-
-                dest = ARCHIVE
-                try:
-                    await asyncio.to_thread(ingest_file, f)
-                except DuplicateError as e:
-                    log.warning("%s", e)
-                except Exception as e:
-                    log.error("failed to parse %s: %s", f.name, e)
-                    dest = FAILED
-
-                try:
-                    move_safe(f, dest)
-                except OSError as e:
-                    log.warning(
-                        "cannot move %s out of inbox (%s) — check write "
-                        "permissions on the mount (uid mapping); "
-                        "file imported but left in place", f.name, e)
-                    stuck.add(key)
-            stuck &= seen        # забываем файлы, которых больше нет в инбоксе
+            await scan_inbox(stuck, pending)
         except Exception as e:
             log.error("inbox scan error: %s", e)
         await asyncio.sleep(WATCH_INTERVAL)
@@ -142,7 +162,7 @@ async def watch_inbox():
 def build_mqtt_payload() -> dict:
     """Раздельная статистика по видам спорта — та же логика, что на рамке:
     категории по названию, календарные границы в локальном поясе."""
-    from frame import _last_of, _local, _totals
+    from stats import last_of as _last_of, local_dt as _local, totals as _totals
     acts = store.list_activities()
 
     def side(cat: str) -> dict:
@@ -192,6 +212,25 @@ def publish_mqtt_state():
                  "state+frame" if len(msgs) > 1 else "state", MQTT_HOST, MQTT_PREFIX)
     except Exception as e:
         log.warning("mqtt publish failed: %s", e)
+
+
+_mqtt_timer: threading.Timer | None = None
+_mqtt_lock = threading.Lock()
+
+
+def schedule_mqtt_publish(delay: float = 2.0) -> None:
+    """Публикация в фоне с дебаунсом. HTTP-запрос не ждёт брокера (при
+    недоступном MQTT это был TCP-таймаут на каждое действие), а пакетный
+    импорт даёт одну публикацию и один рендер кадра, а не по штуке на файл."""
+    global _mqtt_timer
+    if not MQTT_HOST:
+        return
+    with _mqtt_lock:
+        if _mqtt_timer:
+            _mqtt_timer.cancel()
+        _mqtt_timer = threading.Timer(delay, publish_mqtt_state)
+        _mqtt_timer.daemon = True
+        _mqtt_timer.start()
 
 
 # ---------------------------------------------------------------- app
@@ -253,23 +292,24 @@ def activity(act_id: int):
 
 
 @app.get("/api/activities/{act_id}/trackpoints")
-def trackpoints(act_id: int, step: int = 1):
+def trackpoints(act_id: int, step: int = Query(1, ge=1, le=1000)):
     """step > 1 thins the series for lighter charts (e.g. step=5).
     Пустой список — валидный ответ: бывают активности без точек."""
     if not store.get_activity(act_id):
         raise HTTPException(404, "not found")
     tps = store.get_trackpoints(act_id)
-    out = tps[::max(1, step)]
+    out = tps[::step]
     if tps and out[-1] is not tps[-1]:   # прореживание не должно терять финиш
         out.append(tps[-1])
     return out
 
 
 @app.get("/api/activities/{act_id}/splits")
-def splits(act_id: int, size: float = 1000):
+def splits(act_id: int, size: float = Query(1000, ge=100, le=100_000)):
     """Разбивка по километрам (как Splits в Strava): темп и набор высоты.
     Границы километров интерполируются между трекпоинтами; хвост короче
-    50 м отбрасывается."""
+    50 м отбрасывается. size ограничен снизу: при size <= 0 граница не
+    сдвигалась и цикл ниже не завершался (запрос вешал сервер)."""
     if not store.get_activity(act_id):
         raise HTTPException(404, "not found")
     tps = [t for t in store.get_trackpoints(act_id)
@@ -312,7 +352,7 @@ def splits(act_id: int, size: float = 1000):
 def delete(act_id: int):
     store.delete_activity(act_id)
     shutil.rmtree(PHOTOS / str(act_id), ignore_errors=True)
-    publish_mqtt_state()
+    schedule_mqtt_publish()
     return {"ok": True}
 
 
@@ -331,12 +371,12 @@ def set_category(act_id: int, body: CategoryBody):
     if not store.get_activity(act_id):
         raise HTTPException(404, "not found")
     store.set_category(act_id, body.category)
-    publish_mqtt_state()          # категория влияет на рамку и MQTT-итоги
+    schedule_mqtt_publish()       # категория влияет на рамку и MQTT-итоги
     return {"ok": True}
 
 
 class NotesBody(BaseModel):
-    notes: str = ""
+    notes: str = Field("", max_length=20_000)
 
 
 @app.patch("/api/activities/{act_id}/notes")
@@ -377,10 +417,12 @@ THUMB_SIZE = 400          # длинная сторона миниатюры
 
 
 def make_thumb(src_path: Path) -> None:
-    """Миниатюра рядом с оригиналом: .thumb/<имя.расш>.jpg. Ошибки не фатальны."""
+    """Миниатюра рядом с оригиналом: .thumb/<имя.расш>.jpg. Ошибки не фатальны.
+    Неудачу помечаем файлом .bad: иначе битое изображение перекодировалось бы
+    заново на каждый запрос миниатюры."""
+    tp = thumb_path(src_path)
     try:
         from PIL import Image, ImageOps
-        tp = thumb_path(src_path)
         tp.parent.mkdir(exist_ok=True)
         img = Image.open(src_path)
         img = ImageOps.exif_transpose(img)      # фото с телефона: уважаем ориентацию
@@ -388,12 +430,21 @@ def make_thumb(src_path: Path) -> None:
         img.convert("RGB").save(tp, quality=80)
     except Exception as e:
         log.warning("thumbnail failed for %s: %s", src_path.name, e)
+        try:
+            tp.unlink(missing_ok=True)          # недописанный JPEG
+            thumb_failed_marker(src_path).touch()
+        except OSError:
+            pass
 
 
 def thumb_path(orig: Path) -> Path:
     # полное имя, а не stem: у sunset.jpg и sunset.png должны быть разные миниатюры.
     # Старые миниатюры (по stem) просто не находятся и лениво перегенерируются.
     return orig.parent / ".thumb" / (orig.name + ".jpg")
+
+
+def thumb_failed_marker(orig: Path) -> Path:
+    return orig.parent / ".thumb" / (orig.name + ".bad")
 
 
 def media_response(path: Path, name: str) -> FileResponse:
@@ -413,28 +464,39 @@ async def add_photo(act_id: int, file: UploadFile):
     pdir = PHOTOS / str(act_id)
     pdir.mkdir(parents=True, exist_ok=True)
     safe = Path(file.filename).name
-    dst = pdir / safe
-    i = 1
-    while dst.exists():
-        dst = pdir / f"{Path(safe).stem}-{i}{ext}"
-        i += 1
+    # "xb" — атомарное «создать, если нет»: между проверкой exists() и open()
+    # были await'ы, и две параллельные загрузки с одним именем затирали друг друга
+    dst, i = pdir / safe, 1
+    while True:
+        try:
+            out = open(dst, "xb")
+            break
+        except FileExistsError:
+            dst = pdir / f"{Path(safe).stem}-{i}{ext}"
+            i += 1
     # кусками: видео не должно проезжать через память целиком. Лимит по типу
     # проверяется тут, общий потолок — раньше, в limit_upload_size (до спула тела)
     size = 0
     try:
-        with open(dst, "wb") as out:
+        with out:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > limit:
                     raise HTTPException(413, f"file too large ({limit // 1024 // 1024} MB max)")
                 await asyncio.to_thread(out.write, chunk)
+        if media_kind(dst.name) == "image":
+            await asyncio.to_thread(make_thumb, dst)
+        try:
+            photo_id = store.add_photo(act_id, dst.name)
+        except sqlite3.IntegrityError:
+            # тренировку удалили, пока шла загрузка
+            raise HTTPException(404, "not found")
     except BaseException:
-        # любой сбой (413, нет места, отмена) — не оставляем огрызок без записи в БД
+        # любой сбой (413, нет места, отмена, БД) — не оставляем файл без записи в БД
         dst.unlink(missing_ok=True)
+        thumb_path(dst).unlink(missing_ok=True)
+        thumb_failed_marker(dst).unlink(missing_ok=True)
         raise
-    if media_kind(dst.name) == "image":
-        await asyncio.to_thread(make_thumb, dst)
-    photo_id = store.add_photo(act_id, dst.name)
     return {"id": photo_id, "filename": dst.name, "kind": media_kind(dst.name)}
 
 
@@ -446,7 +508,8 @@ def get_photo(photo_id: int, thumb: int = 0):
     path = PHOTOS / str(ph["activity_id"]) / ph["filename"]
     if thumb and media_kind(ph["filename"]) == "image":
         tp = thumb_path(path)
-        if not tp.exists() and path.exists():
+        if (not tp.exists() and path.exists()
+                and not thumb_failed_marker(path).exists()):
             make_thumb(path)              # ленивая генерация для старых фото
         if tp.exists():
             return media_response(tp, tp.name)
@@ -462,12 +525,13 @@ def delete_photo(photo_id: int):
         orig = PHOTOS / str(ph["activity_id"]) / ph["filename"]
         orig.unlink(missing_ok=True)
         thumb_path(orig).unlink(missing_ok=True)
+        thumb_failed_marker(orig).unlink(missing_ok=True)
         store.delete_photo(photo_id)
     return {"ok": True}
 
 
 @app.get("/api/summary/weekly")
-def weekly(weeks: int = 12):
+def weekly(weeks: int = Query(12, ge=1, le=1000)):
     return store.weekly_summary(weeks)
 
 

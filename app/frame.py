@@ -11,17 +11,12 @@ import hashlib
 import io
 import json
 import os
-from datetime import datetime, timezone
-
-
-def _local(iso: str) -> datetime:
-    """Строка из БД -> локальное время (naive считаем UTC)."""
-    dt = datetime.fromisoformat(iso)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone()
+import logging
+from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
+
+from stats import last_of as _last_of, local_dt as _local, totals as _totals
 
 W, H = 800, 480
 RENDER_VERSION = 10  # менять при правках макета — форсирует перерисовку рамки
@@ -33,6 +28,10 @@ _L10N = {
     "en": {"week": "Week", "month": "Month", "year": "Year",
            "km": "km", "empty": "No workouts yet"},
 }
+if FRAME_LANG not in _L10N:          # опечатка в env не должна ронять кадр
+    logging.getLogger("kilometrika").warning(
+        "unknown FRAME_LANG=%r, falling back to 'ru'", FRAME_LANG)
+    FRAME_LANG = "ru"
 L = _L10N[FRAME_LANG]
 
 WHITE = (255, 255, 255)
@@ -85,30 +84,7 @@ def paste_icon(img: Image.Image, name: str, cx: int, cy: int, size: int, color):
 
 # ---------------------------------------------------------------- data
 
-def _totals(acts, category: str) -> dict:
-    now = datetime.now().astimezone()
-    iso_now = now.isocalendar()[:2]
-    out = {"week": 0.0, "month": 0.0, "year": 0.0}
-    for a in acts:
-        if not a["start_time"] or a.get("category") != category:
-            continue
-        dt = _local(a["start_time"])
-        km = (a["distance_m"] or 0) / 1000
-        if dt.year == now.year:
-            out["year"] += km
-            if dt.month == now.month:
-                out["month"] += km
-        if dt.isocalendar()[:2] == iso_now:
-            out["week"] += km
-    return out
-
-
-def _last_of(acts, category: str) -> dict | None:
-    for a in acts:
-        if a["start_time"] and a.get("category") == category:
-            return a
-    return None
-
+# _totals / _last_of / _local живут в stats.py (без Pillow) — общие с MQTT
 
 def _fmt_km(v: float) -> str:
     # Десятые везде, чтобы бег и велосипед выглядели одинаково; целое — только

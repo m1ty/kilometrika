@@ -245,16 +245,17 @@ const fmtDur = s => {
 const CAT_COLORS = { run: "#7ee08a", bike: "#58a6ff", other: "#c9a15a" };
 // категорию считает сервер при импорте; эвристика — фолбэк для старых записей
 const sportCat = a => a.category ||
-  (/бег|run|jog/i.test(a.sport||"") ? "run" : /вел|bik|cycl|ride/i.test(a.sport||"") ? "bike" : "other");
+  (/бег|run|jog/i.test(a.sport||"") ? "run" : /вело|bik|cycl|ride/i.test(a.sport||"") ? "bike" : "other");
 const catColor = a => CAT_COLORS[sportCat(a)] || CAT_COLORS.other;
 const asUTC = iso => /Z$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z";
 const fmtDate = iso => iso ? new Date(asUTC(iso)).toLocaleString("ru-RU",
   {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"}) : "—";
-const pace = (dur, dist) => {
-  if (!dist || !dur) return "—";
-  const spk = dur / (dist/1000), m = Math.floor(spk/60), s = Math.round(spk%60);
-  return `${m}:${String(s).padStart(2,"0")} /км`;
+// округляем ДО разбиения на минуты и секунды: иначе 299.6 с давало «4:60»
+const fmtPace = s => {
+  s = Math.round(s);
+  return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
 };
+const pace = (dur, dist) => (!dist || !dur) ? "—" : `${fmtPace(dur / (dist/1000))} /км`;
 
 // свёрнутость годов в списке; для годов без записи — развёрнут только текущий
 const YEARS_KEY = "kmYearsOpen";
@@ -262,8 +263,20 @@ const yearsOpen = JSON.parse(localStorage.getItem(YEARS_KEY) || "{}");
 
 // общий кэш: одним запросом и для списка, и для графика
 let allActs = [];
+// GET с проверкой статуса: 404/500 — это ошибка, а не «данные»
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function reload() {
-  allActs = await (await fetch("/api/activities")).json();
+  try {
+    allActs = await getJSON("/api/activities");
+  } catch (e) {
+    $("#counter").textContent = "нет связи с сервером";
+    return;                       // прежний список остаётся на экране
+  }
   loadList(); loadWeekly();
 }
 
@@ -361,8 +374,10 @@ function loadWeekly() {
   });
 }
 
-document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".seg button").forEach(x => x.classList.remove("on"));
+// только кнопки периода ([data-p]): общий ".seg button" задевал и переключатель
+// категории открытой тренировки — снимал с него подсветку
+document.querySelectorAll(".seg button[data-p]").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".seg button[data-p]").forEach(x => x.classList.remove("on"));
   b.classList.add("on");
   aggPeriod = b.dataset.p;
   loadWeekly();
@@ -396,8 +411,6 @@ function drawTrack(tps, color) {
   map.fitBounds(L.latLngBounds(pts), { padding: [20, 20] });
 }
 
-const fmtPace = s => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
-
 function renderSplits(splits, color) {
   const sect = $("#splitsSect"), box = $("#splits");
   box.innerHTML = "";
@@ -426,14 +439,43 @@ function markSelected() {
     el.classList.toggle("sel", +el.dataset.id === selectedId));
 }
 
+// Заметки: notesLoaded — текст, пришедший с сервера для тренировки на экране.
+// Пока поле отличается от него, правка не сохранена, и перерисовка панели
+// (после загрузки фото, смены категории) не должна её стирать.
+let notesLoaded = "";
+const notesDirty = () => selectedId != null && $("#notes").value !== notesLoaded;
+
+async function saveNotes(id, text) {
+  const r = await fetch(`/api/activities/${id}/notes`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: text }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+
 async function showActivity(id) {
+  if (id == null) return;
   const seq = ++showSeq;
-  const [act, tps, splits] = await Promise.all([      // параллельно, не по очереди
-    fetch(`/api/activities/${id}`).then(r => r.json()),
-    fetch(`/api/activities/${id}/trackpoints?step=3`).then(r => r.json()),
-    fetch(`/api/activities/${id}/splits`).then(r => r.json()),
-  ]);
+  let act, tps, splits;
+  try {
+    [act, tps, splits] = await Promise.all([      // параллельно, не по очереди
+      getJSON(`/api/activities/${id}`),
+      getJSON(`/api/activities/${id}/trackpoints?step=3`),
+      getJSON(`/api/activities/${id}/splits`),
+    ]);
+  } catch (e) {
+    if (seq === showSeq) alert(`Не удалось открыть тренировку: ${e.message}`);
+    return;
+  }
   if (seq !== showSeq) return;        // пока ждали, выбрали другую тренировку
+  // несохранённые заметки: при уходе на другую тренировку — досохраняем,
+  // при перерисовке той же — оставляем набранный текст в поле
+  const keepNotes = notesDirty() && selectedId === id ? $("#notes").value : null;
+  if (notesDirty() && selectedId !== id) {
+    const oldId = selectedId, text = $("#notes").value;
+    saveNotes(oldId, text).catch(() =>
+      alert("Заметка к предыдущей тренировке не сохранилась:\n\n" + text));
+  }
   selectedId = id;
   markSelected();
   $("#placeholder").hidden = true;
@@ -457,8 +499,9 @@ async function showActivity(id) {
   document.querySelectorAll("#catSeg button").forEach(b =>
     b.classList.toggle("on", b.dataset.c === sportCat(act)));
 
-  $("#notes").value = act.notes || "";
-  $("#notesStatus").textContent = "";
+  notesLoaded = act.notes || "";
+  $("#notes").value = keepNotes ?? notesLoaded;
+  if (keepNotes == null) $("#notesStatus").textContent = "";
   renderPhotos(act.photos || []);
 
   const labels = tps.map(t => ((t.distance ?? 0)/1000).toFixed(2));
@@ -503,7 +546,7 @@ $("#delBtn").onclick = async () => {
   if (!selectedId || !confirm("Удалить тренировку?")) return;
   if (!await send(`/api/activities/${selectedId}`, { method: "DELETE" })) return;
   showSeq++;                      // отменить ещё не дорисованный showActivity
-  selectedId = null;
+  selectedId = null; notesLoaded = "";
   $("#detail").hidden = true; $("#placeholder").hidden = false;
   reload();
 };
@@ -512,12 +555,12 @@ $("#notesSave").onclick = async () => {
   if (!selectedId) return;
   const st = $("#notesStatus");
   st.classList.remove("err"); st.textContent = "сохранение…";
+  const id = selectedId, text = $("#notes").value;
   try {
-    const r = await fetch(`/api/activities/${selectedId}/notes`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: $("#notes").value }),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    await saveNotes(id, text);
+    // если за время запроса открыли другую тренировку — её состояние не трогаем;
+    // если успели дописать — поле отличается от text и остаётся «несохранённым»
+    if (id === selectedId) notesLoaded = text;
     st.textContent = "сохранено";
     setTimeout(() => { if (st.textContent === "сохранено") st.textContent = ""; }, 2000);
   } catch {
@@ -596,9 +639,13 @@ async function uploadBatch(files, url, prog) {
 $("#photoInput").onchange = async e => {
   // копия ДО очистки: e.target.files — живой FileList, value="" опустошает его
   const files = [...e.target.files]; e.target.value = "";
+  if (selectedId == null) return;
   await uploadBatch(files, `/api/activities/${selectedId}/photos`, $("#photoProg"));
-  showActivity(selectedId);
+  showActivity(selectedId);       // null (тренировку удалили за время загрузки) — no-op
 };
+
+// закрытие вкладки с недописанной заметкой — браузер переспросит
+window.addEventListener("beforeunload", e => { if (notesDirty()) e.preventDefault(); });
 
 async function uploadFiles(files) {
   await uploadBatch(files, "/api/upload", $("#dropProg"));

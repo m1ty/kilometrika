@@ -50,4 +50,8 @@ code=$(pct exec "$CT" -- python3 -c "
 import urllib.request
 print(urllib.request.urlopen('http://localhost:8000/api/activities').status)" 2>/dev/null || echo FAIL)
 echo "  API отвечает: $code"
+if [ "$code" != "200" ]; then
+    echo "ОШИБКА: сервис запущен, но API не отвечает — смотри journalctl -u kilometrika" >&2
+    exit 1
+fi
 echo "OK. Не забудь Ctrl+F5 в браузере."

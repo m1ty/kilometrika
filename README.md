@@ -45,7 +45,7 @@ data/
 └── failed/     # files that failed to parse
 ```
 
-The inbox is polled every `WATCH_INTERVAL` seconds (default 30). To feed it from a NAS or router share, bind-mount the share over the inbox:
+The inbox is polled every `WATCH_INTERVAL` seconds (default 30); a file is imported once its size and mtime stay unchanged for one full interval, so slow network copies are not picked up half-written. To feed it from a NAS or router share, bind-mount the share over the inbox:
 
 ```yaml
 volumes:

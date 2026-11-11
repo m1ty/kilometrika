@@ -2,21 +2,28 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 
+# Ключи ищутся только в НАЧАЛЕ слова: для GPX «спортом» бывает название трека,
+# и поиск подстроки давал бег на «Brunswick» и велосипед на «Великий Новгород».
 CATEGORIES = {
-    "run":  ("бег", "run", "jog"),
-    "bike": ("вел", "bik", "cycl", "ride"),
+    "run":  ("бег", "пробеж", "run", "jog"),
+    "bike": ("вело", r"велик(?:е|у|ом)?\b","bik", "cycl", "ride"),
 }
+_CAT_RE = {cat: re.compile(r"(?<![^\W\d_])(?:" + "|".join(keys) + ")")
+           for cat, keys in CATEGORIES.items()}
+_CAMEL = re.compile(r"(?<=[a-zа-яё])(?=[A-ZА-ЯЁ])")
 
 
 def sport_category(sport: str | None) -> str:
     """Единственное место, где решается 'бег это или велосипед'."""
-    s = (sport or "").lower()
-    for cat, keys in CATEGORIES.items():
-        if any(k in s for k in keys):
+    # CamelCase (Strava: VirtualRide, TrailRun, EBikeRide) режем на слова
+    s = _CAMEL.sub(" ", sport or "").lower()
+    for cat, rx in _CAT_RE.items():
+        if rx.search(s):
             return cat
     return "other"
 
@@ -181,14 +188,31 @@ def _gpx_ext_int(point, *names) -> int | None:
     return None
 
 
+_XML_DECL = re.compile(rb"""^\s*<\?xml[^>]*?encoding\s*=\s*["']([A-Za-z0-9._-]+)["'][^>]*\?>""")
+
+
+def _decode_xml(raw: bytes) -> str:
+    """Байты GPX -> текст. gpxpy считает вход заведомо UTF-8, поэтому кодировку
+    из XML-пролога (windows-1251 и т.п.) применяем сами; BOM снимаем.
+    Пролог убираем: текст уже декодирован, объявленная кодировка устарела."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    m = _XML_DECL.match(raw)
+    enc = m.group(1).decode("ascii") if m else "utf-8"
+    try:
+        text = raw.decode(enc)
+    except LookupError:                      # неизвестное имя кодировки
+        text = raw.decode("utf-8")
+    return re.sub(r"^\s*<\?xml[^>]*\?>", "", text, count=1)
+
+
 def parse_gpx(path: str) -> Activity:
     import gpxpy
 
     with open(path, "rb") as f:
-        file_hash = hashlib.sha256(f.read()).hexdigest()[:16]
-
-    with open(path, encoding="utf-8-sig") as f:   # -sig: некоторые экспортёры пишут BOM
-        gpx = gpxpy.parse(f)
+        raw = f.read()
+    file_hash = hashlib.sha256(raw).hexdigest()[:16]
+    gpx = gpxpy.parse(_decode_xml(raw))
 
     tps: list[Trackpoint] = []
     sport = "Other"

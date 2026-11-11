@@ -6,6 +6,7 @@
 - strava_ride.gpx — GPX с пульсом/каденсом в gpxtpx-расширениях
 - broken.tcx — мусор
 """
+import codecs
 import sys
 from pathlib import Path
 
@@ -22,6 +23,11 @@ FIX = Path(__file__).parent / "fixtures"
     ("Бег на улице", "run"), ("Running", "run"), ("jogging", "run"),
     ("Езда на велосипеде", "bike"), ("Biking", "bike"), ("Cycling", "bike"), ("Ride", "bike"),
     ("Ходьба", "other"), ("Плавание", "other"), (None, "other"), ("", "other"),
+    # ключ — только в начале слова: название трека не должно давать ложных срабатываний
+    ("Walk in Brunswick", "other"), ("Великий Новгород", "other"), ("Stride", "other"),
+    ("VirtualRide", "bike"), ("TrailRun", "run"), ("EBikeRide", "bike"),
+    ("trail_running", "run"), ("Вечерняя пробежка", "run"), ("На велике", "bike"),
+    ("Велопрогулка", "bike"), ("Morning Run", "run"),
 ])
 def test_sport_category(sport, expected):
     assert sport_category(sport) == expected
@@ -97,3 +103,18 @@ def test_gpx_route_without_timestamps(tmp_path):
     assert act.category == "run"               # по названию трека
     assert len(act.trackpoints) == 3
     assert act.trackpoints[-1].distance == act.distance_m
+
+
+def test_gpx_non_utf8_encoding_and_bom(tmp_path):
+    """Кодировку берём из XML-пролога, а не считаем файл заведомо UTF-8."""
+    body = ('<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1">'
+            '<trk><name>Пробежка</name><trkseg>'
+            '<trkpt lat="55.60" lon="37.57"><time>2026-07-10T06:00:00Z</time></trkpt>'
+            '<trkpt lat="55.61" lon="37.57"><time>2026-07-10T06:05:00Z</time></trkpt>'
+            '</trkseg></trk></gpx>')
+    cp = tmp_path / "cp1251.gpx"
+    cp.write_bytes(('<?xml version="1.0" encoding="windows-1251"?>' + body).encode("cp1251"))
+    assert parse_activity(str(cp)).category == "run"
+    bom = tmp_path / "bom.gpx"
+    bom.write_bytes(codecs.BOM_UTF8 + ('<?xml version="1.0" encoding="UTF-8"?>' + body).encode())
+    assert parse_activity(str(bom)).category == "run"

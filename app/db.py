@@ -113,9 +113,14 @@ class Store:
         return act_id
 
     def list_activities(self) -> list[dict]:
+        """Сводки без тяжёлых полей (laps_json, notes): список запрашивают
+        и UI, и рамка, и MQTT — подробности отдаёт get_activity."""
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM activities ORDER BY start_time DESC"
+                """SELECT id, file_hash, filename, sport, category, start_time,
+                          duration_s, distance_m, calories, hr_avg, hr_max,
+                          ascent_m, descent_m, cadence_avg
+                   FROM activities ORDER BY start_time DESC"""
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -156,7 +161,7 @@ class Store:
             b["duration_s"] += a["duration_s"] or 0
             if a["hr_avg"]:
                 b["_hr"].append(a["hr_avg"])
-        out = [buckets[k] for k in sorted(buckets)][-weeks:]
+        out = [buckets[k] for k in sorted(buckets)][-max(1, weeks):]
         for b in out:
             hr = b.pop("_hr")
             b["hr_avg"] = round(sum(hr) / len(hr), 1) if hr else None

@@ -257,3 +257,158 @@ def test_mqtt_publishes_stats_even_if_frame_render_fails(client, monkeypatch):
     topics = [m["topic"] for m in sent]
     assert topics == [f"{main.MQTT_PREFIX}/state"]
     assert "run" in json.loads(sent[0]["payload"])
+
+
+# ------------------------------------------------------------ аудит 2026-11
+
+@pytest.mark.parametrize("url", [
+    "/api/activities/1/splits?size=0",
+    "/api/activities/1/splits?size=-1000",
+    "/api/activities/1/trackpoints?step=0",
+    "/api/activities/1/trackpoints?step=-5",
+    "/api/summary/weekly?weeks=0",
+])
+def test_bad_query_params_rejected(client, url):
+    """size<=0 вешал сервер бесконечным циклом; остальное — границы срезов."""
+    _upload(client, "garmin_run.tcx")
+    assert client.get(url).status_code == 422
+
+
+def test_notes_size_limited(client):
+    _upload(client, "garmin_run.tcx")
+    r = client.patch("/api/activities/1/notes", json={"notes": "x" * 20_001})
+    assert r.status_code == 422
+
+
+def test_activity_list_is_light(client):
+    """Список не тащит круги и заметки — они есть в карточке тренировки."""
+    _upload(client, "garmin_run.tcx")
+    client.patch("/api/activities/1/notes", json={"notes": "секрет"})
+    a = client.get("/api/activities").json()[0]
+    assert "laps_json" not in a and "notes" not in a
+    assert client.get("/api/activities/1").json()["notes"] == "секрет"
+
+
+def test_mqtt_payload_does_not_need_pillow(client, monkeypatch):
+    """Цифры для HA считаются без Pillow: frame.py (и PIL) не импортируется."""
+    import builtins
+
+    import main
+
+    _upload(client, "garmin_run.tcx")
+    monkeypatch.delitem(sys.modules, "frame", raising=False)
+    real = builtins.__import__
+
+    def no_pil(name, *a, **k):
+        if name == "PIL" or name.startswith("PIL.") or name == "frame":
+            raise ImportError(f"No module named {name!r}")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_pil)
+    payload = main.build_mqtt_payload()
+    assert payload["total_activities"] == 1 and "week_km" in payload["run"]
+
+
+def test_mqtt_schedule_is_debounced_and_non_blocking(client, monkeypatch):
+    """Серия действий даёт одну публикацию, и вызывающий её не ждёт."""
+    import threading
+
+    import main
+
+    done = threading.Event()
+    calls = []
+
+    def fake_publish():
+        calls.append(1)
+        done.set()
+
+    monkeypatch.setattr(main, "MQTT_HOST", "broker.invalid")
+    monkeypatch.setattr(main, "publish_mqtt_state", fake_publish)
+    for _ in range(5):
+        main.schedule_mqtt_publish(delay=0.05)
+    assert calls == []                       # ничего не выполнилось синхронно
+    assert done.wait(2) and len(calls) == 1
+
+
+def test_inbox_waits_for_stable_file_and_ignores_case(client, tmp_path):
+    """Файл импортируется лишь на втором проходе без изменений; расширение
+    в верхнем регистре (ACTIVITY.TCX) тоже подхватывается."""
+    import asyncio
+
+    import main
+
+    f = main.INBOX / "RUN.TCX"
+    data = (FIX / "garmin_run.tcx").read_bytes()
+    f.write_bytes(data[:500])                # копия ещё идёт
+    stuck, pending = set(), {}
+
+    asyncio.run(main.scan_inbox(stuck, pending))
+    assert f.exists() and client.get("/api/activities").json() == []
+
+    f.write_bytes(data)                      # дописали — размер изменился
+    asyncio.run(main.scan_inbox(stuck, pending))
+    assert f.exists() and client.get("/api/activities").json() == []
+
+    asyncio.run(main.scan_inbox(stuck, pending))     # стабилен целый проход
+    assert not f.exists()
+    assert (main.ARCHIVE / "RUN.TCX").exists()
+    assert len(client.get("/api/activities").json()) == 1
+
+
+def test_inbox_broken_file_goes_to_failed(client):
+    import asyncio
+
+    import main
+
+    (main.INBOX / "bad.tcx").write_bytes((FIX / "broken.tcx").read_bytes())
+    stuck, pending = set(), {}
+    asyncio.run(main.scan_inbox(stuck, pending))
+    asyncio.run(main.scan_inbox(stuck, pending))
+    assert (main.FAILED / "bad.tcx").exists()
+
+
+def test_broken_image_thumb_not_retried(client, monkeypatch):
+    """Битая картинка: миниатюра пробуется один раз, дальше отдаётся оригинал
+    без повторного декодирования на каждый запрос."""
+    import main
+
+    _upload(client, "garmin_run.tcx")
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 100          # не декодируется
+    pid = client.post("/api/activities/1/photos",
+                      files={"file": ("p.png", io.BytesIO(png))}).json()["id"]
+    calls = []
+    real = main.make_thumb
+    monkeypatch.setattr(main, "make_thumb", lambda p: (calls.append(p), real(p)))
+    for _ in range(3):
+        assert client.get(f"/api/photos/{pid}?thumb=1").content == png
+    assert calls == []
+    client.delete(f"/api/photos/{pid}")
+    assert list((main.PHOTOS / "1" / ".thumb").iterdir()) == []
+
+
+def test_photo_orphan_removed_if_activity_vanishes(client, monkeypatch):
+    """Тренировку удалили во время загрузки — файл не остаётся без записи в БД."""
+    import sqlite3
+
+    import main
+
+    _upload(client, "garmin_run.tcx")
+
+    def gone(*a):
+        raise sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+
+    monkeypatch.setattr(main.store, "add_photo", gone)
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+    r = client.post("/api/activities/1/photos", files={"file": ("p.png", io.BytesIO(png))})
+    assert r.status_code == 404
+    left = [p for p in (main.PHOTOS / "1").rglob("*") if p.is_file()]
+    assert left == []
+
+
+def test_same_name_photos_get_distinct_files(client):
+    _upload(client, "garmin_run.tcx")
+    names = []
+    for body in (b"\x89PNG\r\n\x1a\n" + b"1" * 50, b"\x89PNG\r\n\x1a\n" + b"2" * 50):
+        names.append(client.post("/api/activities/1/photos",
+                                 files={"file": ("p.png", io.BytesIO(body))}).json()["filename"])
+    assert names == ["p.png", "p-1.png"]
