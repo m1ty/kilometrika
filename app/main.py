@@ -310,7 +310,8 @@ def splits(act_id: int, size: float = Query(1000, ge=100, le=100_000)):
     Границы километров интерполируются между трекпоинтами; хвост короче
     50 м отбрасывается. size ограничен снизу: при size <= 0 граница не
     сдвигалась и цикл ниже не завершался (запрос вешал сервер)."""
-    if not store.get_activity(act_id):
+    act = store.get_activity(act_id)
+    if not act:
         raise HTTPException(404, "not found")
     tps = [t for t in store.get_trackpoints(act_id)
            if t["distance"] is not None and t["time"]]
@@ -321,6 +322,13 @@ def splits(act_id: int, size: float = Query(1000, ge=100, le=100_000)):
     base = tps[0]["distance"]
     pts = [(t["distance"] - base, datetime.fromisoformat(t["time"]).timestamp(),
             t["elevation"]) for t in tps]
+    # итоговая дистанция часов (сумма кругов) обычно точнее суммы GPS-отрезков;
+    # подгоняем трек под неё, чтобы километры сходились с общим темпом
+    track_total = pts[-1][0]
+    total = act.get("distance_m") or 0
+    if track_total > 0 and total > 0 and 0.8 <= total / track_total <= 1.25:
+        k = total / track_total
+        pts = [(d * k, s, e) for d, s, e in pts]
     out = []
     boundary = size
     t_cross_prev = pts[0][1]
